@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agenda IA Montpellier — Oreegami</title>
+    <meta name="description" content="Les évènements IA à Montpellier pour les étudiants d’Oreegami." />
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="mode-embed">
+    <div id="app"></div>
+
+    <div class="modal-backdrop" id="modal-backdrop" hidden>
+      <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Fenêtre de dialogue"></div>
+    </div>
+
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+
+    <noscript>
+      <div class="noscript embed-noscript">
+        <p>Activez JavaScript pour afficher l’agenda, ou <a href="/events.ics">téléchargez le flux .ics</a>.</p>
+      </div>
+    </noscript>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

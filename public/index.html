@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agenda IA Montpellier — Oreegami</title>
+    <meta
+      name="description"
+      content="L’agenda partagé des évènements IA à Montpellier pour les étudiants d’Oreegami : ateliers, meetups, hackathons et conférences."
+    />
+    <meta name="theme-color" content="#4f46e5" />
+    <meta property="og:title" content="Agenda IA Montpellier — Oreegami" />
+    <meta
+      property="og:description"
+      content="Ateliers, meetups, hackathons et conférences IA à Montpellier. Propose un évènement, ajoute-le à ton agenda en un clic."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="mode-full">
+    <div id="app"></div>
+
+    <div class="modal-backdrop" id="modal-backdrop" hidden>
+      <div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Fenêtre de dialogue"></div>
+    </div>
+
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+
+    <noscript>
+      <div class="noscript">
+        <h1>Agenda IA Montpellier — Oreegami</h1>
+        <p>
+          Cette page a besoin de JavaScript pour afficher le calendrier et le formulaire. Vous pouvez tout de même
+          télécharger l’agenda complet au format iCalendar : <a href="/events.ics">events.ics</a>.
+        </p>
+      </div>
+    </noscript>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

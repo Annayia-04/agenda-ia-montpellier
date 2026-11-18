@@ -1,0 +1,16 @@
+{
+  "name": "agenda-ia-montpellier",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agenda partagé des évènements IA à Montpellier pour les étudiants d’Oreegami.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node scripts/test-ics.mjs && node scripts/test-api.mjs",
+    "test:ui": "node scripts/ui-test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
