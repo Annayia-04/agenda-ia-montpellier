@@ -8,6 +8,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const EMBED = document.body.classList.contains('mode-embed');
 
 const ADMIN_KEY = 'agenda-admin-token';
+const EDIT_TOKENS_KEY = 'agenda-edit-tokens';
 const THEME_KEY = 'agenda-theme';
 
 const CATEGORY_META = {
@@ -54,7 +55,7 @@ const state = {
   config: null,
   error: '',
   loading: true,
-  view: EMBED ? 'list' : 'month',
+  view: EMBED || window.matchMedia('(max-width: 760px)').matches ? 'list' : 'month',
   month: startOfMonth(new Date()),
   category: 'all',
   showPast: false,
@@ -194,11 +195,47 @@ function monthDays(month) {
 
 /* -------------------------------- API -------------------------------- */
 
-async function api(path, { method = 'GET', body, admin = false, token } = {}) {
+function editTokens() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EDIT_TOKENS_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function editTokenFor(id) {
+  return String(editTokens()[id] || '');
+}
+
+function rememberEditToken(id, token) {
+  try {
+    const tokens = editTokens();
+    tokens[id] = token;
+    localStorage.setItem(EDIT_TOKENS_KEY, JSON.stringify(tokens));
+  } catch {
+    /* localStorage indisponible : l'édition restera possible via le jeton admin */
+  }
+}
+
+function forgetEditToken(id) {
+  try {
+    const tokens = editTokens();
+    delete tokens[id];
+    localStorage.setItem(EDIT_TOKENS_KEY, JSON.stringify(tokens));
+  } catch {
+    /* ignore */
+  }
+}
+
+const canEdit = (event) => Boolean(event && (state.adminToken || editTokenFor(event.id)));
+
+async function api(path, { method = 'GET', body, admin = false, token, editToken } = {}) {
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const adminToken = token || (admin ? state.adminToken : '');
   if (adminToken) headers['X-Admin-Token'] = adminToken;
+  if (editToken) headers['X-Edit-Token'] = editToken;
 
   const response = await fetch(path, {
     method,
@@ -262,13 +299,20 @@ function emptyHtml() {
 
 /* --------------------------- Page complète --------------------------- */
 
+function brandHtml(small = false) {
+  return `
+    <a class="brand ${small ? 'small' : ''}" href="/" aria-label="Agenda IA Montpellier — Oreegami">
+      <img class="brand-logo" src="/oreegami-logo.svg" alt="Oreegami" width="140" height="58" />
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="brand-text"><strong>Agenda IA</strong><small>Montpellier</small></span>
+    </a>
+  `;
+}
+
 function fullHtml() {
   return `
     <header class="site-header">
-      <a class="brand" href="/" aria-label="Agenda IA Montpellier">
-        <span class="brand-mark">IA</span>
-        <span class="brand-text"><strong>Agenda IA</strong><small>Montpellier · Oreegami</small></span>
-      </a>
+      ${brandHtml()}
       <nav class="site-nav" aria-label="Navigation principale">
         <button class="nav-link ${state.view === 'month' ? 'is-active' : ''}" data-act="view" data-view="month">Calendrier</button>
         <button class="nav-link ${state.view === 'list' ? 'is-active' : ''}" data-act="view" data-view="list">Évènements</button>
@@ -285,6 +329,10 @@ function fullHtml() {
       ${errorHtml()}
       ${heroHtml()}
       <section class="workspace">
+        <div class="mobile-view-switch">
+          <button class="${state.view === 'month' ? 'is-active' : ''}" data-act="view" data-view="month">Calendrier</button>
+          <button class="${state.view === 'list' ? 'is-active' : ''}" data-act="view" data-view="list">Liste</button>
+        </div>
         <div class="workspace-main">${state.view === 'month' ? calendarHtml() : listHtml()}</div>
         <aside class="workspace-side">${sideHtml()}</aside>
       </section>
@@ -301,7 +349,7 @@ function heroHtml() {
     <section class="hero">
       <div class="hero-copy">
         <span class="eyebrow">${icon('sparkles')} Oreegami · Montpellier</span>
-        <h1>Les rendez-vous IA des étudiants</h1>
+        <h1>Les rendez-vous <span class="hl">IA</span> des étudiants</h1>
         <p>Ateliers, meetups, hackathons et conférences autour de l’intelligence artificielle à Montpellier. Propose un évènement en 30 secondes, ajoute-le à ton agenda en un clic.</p>
         <div class="hero-actions">
           <button class="btn btn-primary" data-act="new-event">${icon('plus')}Proposer un évènement</button>
@@ -459,7 +507,7 @@ function eventCardHtml(event, { past = false } = {}) {
         <a class="btn btn-soft btn-sm" href="/events/${encodeURIComponent(event.id)}.ics" download title="Télécharger pour mon agenda">${icon('calendar')}.ics</a>
         <button class="btn btn-ghost btn-sm" data-act="open-event" data-id="${event.id}">Détails</button>
         ${
-          state.adminToken
+          canEdit(event)
             ? `<button class="icon-btn" data-act="edit-event" data-id="${event.id}" title="Modifier">${icon('edit')}</button>
                <button class="icon-btn danger" data-act="delete-event" data-id="${event.id}" title="Supprimer">${icon('trash')}</button>`
             : ''
@@ -504,7 +552,10 @@ function sideEventHtml(event) {
 function footerHtml() {
   return `
     <footer class="site-footer">
-      <span>Agenda IA Montpellier · Oreegami${state.config?.seed === 'demo' ? ' · données de démonstration' : ''}</span>
+      <div class="footer-brand">
+        <img class="footer-logo" src="/oreegami-logo.svg" alt="Oreegami" width="140" height="58" />
+        <span>Agenda IA Montpellier${state.config?.seed === 'demo' ? ' · données de démonstration' : ''}</span>
+      </div>
       <div class="footer-links">
         <a href="/events.ics" download>Flux .ics</a>
         <button data-act="subscribe">S’abonner</button>
@@ -520,10 +571,7 @@ function footerHtml() {
 function embedHtml() {
   return `
     <header class="embed-header">
-      <a class="brand small" href="/" target="_blank" rel="noopener" title="Ouvrir l’agenda complet">
-        <span class="brand-mark">IA</span>
-        <span class="brand-text"><strong>Agenda IA</strong><small>Montpellier · Oreegami</small></span>
-      </a>
+      ${brandHtml(true)}
       <div class="header-actions">
         <button class="btn btn-primary btn-sm" data-act="new-event">${icon('plus')}Proposer</button>
         <a class="icon-btn" href="/" target="_blank" rel="noopener" title="Ouvrir l’agenda complet">${icon('external')}</a>
@@ -631,7 +679,7 @@ function openEvent(id) {
       ${event.url ? `<a class="btn" href="${esc(event.url)}" target="_blank" rel="noopener">${icon('external')}S’inscrire</a>` : ''}
       <button class="btn btn-ghost" data-act="copy" data-copy="${esc(eventLink(event.id))}">${icon('copy')}Copier le lien</button>
       ${
-        state.adminToken
+        canEdit(event)
           ? `<button class="btn btn-ghost" data-act="edit-event" data-id="${event.id}">${icon('edit')}Modifier</button>
              <button class="btn btn-ghost danger" data-act="delete-event" data-id="${event.id}">${icon('trash')}Supprimer</button>`
           : ''
@@ -661,6 +709,7 @@ function openForm(id = null, { date = '' } = {}) {
         <button type="button" class="icon-btn" data-act="modal-close" aria-label="Fermer">${icon('close')}</button>
       </div>
       <p class="form-sub">Quelques champs suffisent. L’évènement apparaîtra immédiatement dans l’agenda partagé.</p>
+      ${event ? '' : '<p class="form-hint">Tu pourras modifier ou supprimer cet évènement depuis ce navigateur.</p>'}
 
       <div class="hp" aria-hidden="true">
         <label>Site web<input name="website" tabindex="-1" autocomplete="off"></label>
@@ -773,11 +822,17 @@ async function submitEventForm(form) {
   submit.textContent = editing ? 'Enregistrement…' : 'Publication…';
 
   try {
+    const editToken = editing ? editTokenFor(state.editingId) : '';
     const result = await api(editing ? `/api/events/${encodeURIComponent(state.editingId)}` : '/api/events', {
       method: editing ? 'PATCH' : 'POST',
       body: payload,
-      admin: editing,
+      admin: editing && Boolean(state.adminToken),
+      editToken,
     });
+
+    if (!editing && result.editToken && result.event?.id) {
+      rememberEditToken(result.event.id, result.editToken);
+    }
 
     const eventStart = result.event?.start || payload.start;
     state.month = startOfMonth(fromKey(eventStart.slice(0, 10)));
@@ -917,7 +972,13 @@ function deleteEvent(id) {
     'Supprimer cet évènement ?',
     `« ${event.title} » sera retiré de l’agenda et du flux .ics.`,
     async () => {
-      await api(`/api/events/${encodeURIComponent(id)}`, { method: 'DELETE', admin: true });
+      const editToken = editTokenFor(id);
+      await api(`/api/events/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        admin: Boolean(state.adminToken),
+        editToken,
+      });
+      forgetEditToken(id);
       closeModal();
       await load();
       toast('Évènement supprimé');

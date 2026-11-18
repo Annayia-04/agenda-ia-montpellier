@@ -174,7 +174,32 @@ try {
   await waitFor(() => evaluate(`document.querySelector('#modal-backdrop').hidden`));
 
   const created = await (await fetch(`${server.base}/api/events`)).json();
-  assert.ok(created.events.some((event) => event.title === 'Test UI — atelier IA'), 'Évènement créé');
+  const createdEvent = created.events.find((event) => event.title === 'Test UI — atelier IA');
+  assert.ok(createdEvent, 'Évènement créé');
+
+  /* Édition par le créateur, sans jeton admin */
+  await evaluate(`document.querySelector('[data-act="open-event"][data-id="${createdEvent.id}"]').click(); true`);
+  await waitFor(() => evaluate(`!!document.querySelector('.detail-title')`));
+  assert.ok(
+    await evaluate(`!!document.querySelector('.detail-actions [data-act="edit-event"]')`),
+    'Le créateur voit le bouton Modifier sans mode admin'
+  );
+
+  await evaluate(`document.querySelector('.detail-actions [data-act="edit-event"]').click(); true`);
+  await waitFor(() => evaluate(`!!document.querySelector('#event-form')`));
+  await evaluate(`(() => {
+    const form = document.querySelector('#event-form');
+    form.querySelector('[name="title"]').value = 'Titre modifié par le créateur';
+    form.requestSubmit();
+    return true;
+  })()`);
+  await waitFor(() => evaluate(`document.querySelector('#modal-backdrop').hidden`));
+
+  const selfUpdated = await (await fetch(`${server.base}/api/events`)).json();
+  assert.ok(
+    selfUpdated.events.some((event) => event.title === 'Titre modifié par le créateur'),
+    'Évènement modifié par son créateur'
+  );
 
   /* Fiche détail */
   await evaluate(`document.querySelector('[data-act="open-event"]').click(); true`);

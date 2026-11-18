@@ -133,11 +133,57 @@ try {
   assert.equal(created.data.event.title, 'Atelier IA; découverte, test');
   assert.equal(created.data.event.source, 'web');
   assert.equal(created.data.event.url, 'https://example.com/inscription');
+  assert.equal(typeof created.data.editToken, 'string');
+  assert.ok(created.data.editToken.length >= 20, 'Un jeton d’édition est renvoyé à la création');
+  assert.equal(created.data.event.editTokenHash, undefined, 'Le hash du jeton n’est pas exposé');
 
   const eventId = created.data.event.id;
 
   const list = await request('/api/events');
   assert.equal(list.data.count, 1);
+  assert.equal(list.data.events[0].editTokenHash, undefined, 'Le hash n’est pas exposé dans la liste');
+
+  const publicOne = await request(`/api/events/${eventId}`);
+  assert.equal(publicOne.data.event.editTokenHash, undefined, 'Le hash n’est pas exposé dans le détail');
+
+  /* --------------------- Édition par le créateur ------------------- */
+
+  const selfUpdated = await request(`/api/events/${eventId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Edit-Token': created.data.editToken },
+    body: JSON.stringify({ description: 'Modifié par son auteur', editTokenHash: 'a'.repeat(64) }),
+  });
+  assert.equal(selfUpdated.response.status, 200, 'Le créateur peut modifier avec son jeton');
+  assert.equal(selfUpdated.data.event.description, 'Modifié par son auteur');
+  assert.equal(selfUpdated.data.event.editTokenHash, undefined);
+
+  const wrongEditToken = await request(`/api/events/${eventId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Edit-Token': 'mauvais-jeton' },
+    body: JSON.stringify({ title: 'Tentative avec un mauvais jeton' }),
+  });
+  assert.equal(wrongEditToken.response.status, 401);
+
+  const other = await createEvent({
+    title: 'Autre évènement',
+    start: '2026-12-05T18:00',
+    end: '2026-12-05T20:00',
+  });
+  assert.equal(other.response.status, 201);
+  assert.ok(other.data.editToken);
+
+  const crossEdit = await request(`/api/events/${eventId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Edit-Token': other.data.editToken },
+    body: JSON.stringify({ title: 'Jeton d’un autre évènement' }),
+  });
+  assert.equal(crossEdit.response.status, 401, 'Un jeton ne peut pas modifier un autre évènement');
+
+  const selfDeleted = await request(`/api/events/${other.data.event.id}`, {
+    method: 'DELETE',
+    headers: { 'X-Edit-Token': other.data.editToken },
+  });
+  assert.equal(selfDeleted.response.status, 200, 'Le créateur peut supprimer son évènement');
 
   /* ---------------------------- Fichiers .ics --------------------- */
 

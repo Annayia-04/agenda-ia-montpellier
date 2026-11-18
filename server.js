@@ -14,6 +14,7 @@ import {
   deleteEvent,
   getEvent,
   listEvents,
+  publicEvent,
   saveDb,
   updateEvent,
 } from './lib/store.js';
@@ -205,6 +206,8 @@ function sameSecret(a, b) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
+const hashToken = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
+
 function checkAdmin(req) {
   const provided = String(req.headers['x-admin-token'] || '').trim();
   return Boolean(provided) && sameSecret(provided, ADMIN_TOKEN);
@@ -218,36 +221,52 @@ function clientIp(req) {
   return req.socket.remoteAddress || 'inconnu';
 }
 
-/* Limite les échecs de jeton de modération : 10 par IP et par fenêtre. */
-const adminFailures = new Map();
+/* Limite les échecs de jeton (admin ou édition) : 10 par IP et par fenêtre. */
+const authFailures = new Map();
 
-function noteAdminFailure(req) {
+function noteAuthFailure(req) {
   const ip = clientIp(req);
   const now = Date.now();
-  const recent = (adminFailures.get(ip) || []).filter((time) => now - time < RATE_WINDOW);
+  const recent = (authFailures.get(ip) || []).filter((time) => now - time < RATE_WINDOW);
   recent.push(now);
-  adminFailures.set(ip, recent);
+  authFailures.set(ip, recent);
 
-  if (adminFailures.size > 5000) {
-    for (const [key, times] of adminFailures) {
-      if (!times.some((time) => now - time < RATE_WINDOW)) adminFailures.delete(key);
+  if (authFailures.size > 5000) {
+    for (const [key, times] of authFailures) {
+      if (!times.some((time) => now - time < RATE_WINDOW)) authFailures.delete(key);
     }
   }
 
   return recent.length > ADMIN_RATE_MAX;
 }
 
-/** Vérifie le jeton ; en cas d'échec, répond 401 ou 429 et renvoie false. */
-function requireAdmin(req, res) {
-  if (checkAdmin(req)) return true;
-  const limited = noteAdminFailure(req);
+function denyWrite(req, res) {
+  const limited = noteAuthFailure(req);
   fail(
     res,
     limited ? 429 : 401,
-    limited ? 'Trop de tentatives de modération. Réessaie dans quelques minutes.' : 'Jeton de modération requis.',
+    limited ? 'Trop de tentatives. Réessaie dans quelques minutes.' : 'Jeton de modération ou d’édition requis.',
     limited ? { 'Retry-After': String(Math.ceil(RATE_WINDOW / 1000)) } : {}
   );
   return false;
+}
+
+/** Vérifie le jeton admin ; en cas d'échec, répond 401 ou 429 et renvoie false. */
+function requireAdmin(req, res) {
+  if (checkAdmin(req)) return true;
+  return denyWrite(req, res);
+}
+
+/** Autorise un admin, ou le créateur qui possède le jeton d'édition de cet évènement. */
+function requireEventWrite(req, res, event) {
+  if (checkAdmin(req)) return true;
+
+  const editToken = String(req.headers['x-edit-token'] || '').trim();
+  if (editToken && event.editTokenHash && sameSecret(hashToken(editToken), event.editTokenHash)) {
+    return true;
+  }
+
+  return denyWrite(req, res);
 }
 
 /* Limite basique les propositions publiques : 8 par IP toutes les 10 minutes. */
@@ -323,7 +342,7 @@ async function serveStatic(req, res, url) {
   if (pathname === '/' || pathname === '') pathname = '/index.html';
   if (pathname === '/agenda') pathname = '/index.html';
   if (pathname === '/embed' || pathname === '/embed/') pathname = '/embed.html';
-  if (pathname === '/favicon.ico') pathname = '/favicon.svg';
+  if (pathname === '/favicon.ico') pathname = '/favicon.png';
 
   const filePath = path.join(PUBLIC_DIR, path.normalize(pathname).replace(/^([/\\])+/, ''));
   if (!filePath.startsWith(PUBLIC_DIR)) return fail(res, 403, 'Accès refusé.');
@@ -375,7 +394,7 @@ async function handleApi(req, res, url) {
         category: url.searchParams.get('category') || '',
         limit: Math.max(0, Math.min(500, Number(url.searchParams.get('limit')) || 0)),
         now,
-      });
+      }).map(publicEvent);
       return json(res, 200, { events, count: events.length, timezone: TIMEZONE });
     }
 
@@ -393,10 +412,12 @@ async function handleApi(req, res, url) {
       if (body.website) return json(res, 201, { ok: true });
 
       try {
+        const editToken = crypto.randomBytes(24).toString('base64url');
         const event = createEvent({ ...body, source: body.source === 'embed' ? 'embed' : 'web' });
+        event.editTokenHash = hashToken(editToken);
         saveDb();
         console.log(`[agenda] + ${event.start} — ${event.title}`);
-        return json(res, 201, { event });
+        return json(res, 201, { event: publicEvent(event), editToken });
       } catch (err) {
         if (err instanceof ValidationError) return fail(res, 400, err.message);
         throw err;
@@ -417,17 +438,18 @@ async function handleApi(req, res, url) {
     const event = getEvent(id);
     if (!event) return fail(res, 404, 'Évènement introuvable.');
 
-    if (method === 'GET') return json(res, 200, { event });
+    if (method === 'GET') return json(res, 200, { event: publicEvent(event) });
 
     if (method === 'PATCH') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireEventWrite(req, res, event)) return;
       if (!isJsonRequest(req)) return fail(res, 415, 'Content-Type application/json requis.');
       const body = await readBody(req);
       if (!isPlainObject(body)) return fail(res, 400, 'Corps de requête JSON invalide.');
+      delete body.editTokenHash;
       try {
         const updated = updateEvent(event.id, body);
         saveDb();
-        return json(res, 200, { event: updated });
+        return json(res, 200, { event: publicEvent(updated) });
       } catch (err) {
         if (err instanceof ValidationError) return fail(res, 400, err.message);
         throw err;
@@ -435,7 +457,7 @@ async function handleApi(req, res, url) {
     }
 
     if (method === 'DELETE') {
-      if (!requireAdmin(req, res)) return;
+      if (!requireEventWrite(req, res, event)) return;
       deleteEvent(event.id);
       saveDb();
       return json(res, 200, { ok: true });
